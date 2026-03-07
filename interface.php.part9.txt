@@ -1,0 +1,892 @@
+
+function renderEditRowForm ($row_id)
+{
+        $row = getRowInfo ($row_id);
+
+        startPortlet ('Attributes');
+        printOpFormIntro ('updateRow');
+        echo '<table border=0 align=center>';
+        echo '<tr><td>&nbsp;</td><th class=tdright>Location:</th><td class=tdleft>';
+        $locations = array ();
+        $locations[0] = '-- NOT SET --';
+        foreach (listCells ('location') as $id => $locationInfo)
+                $locations[$id] = $locationInfo['name'];
+        natcasesort ($locations);
+        printSelect ($locations, array ('name' => 'location_id'), $row['location_id']);
+        echo "</td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Name (required):</th><td class=tdleft><input type=text name=name value='${row['name']}'></td></tr>\n";
+        renderEditAttributeTRs ('updateRow', getAttrValuesSorted ($row_id), 1561);
+        if ($row['count'] == 0)
+        {
+                echo '<tr><td>&nbsp;</td><th class=tdright>Actions:</th><td class=tdleft>';
+                echo getOpLink (array ('op'=>'deleteRow'), '', 'destroy', 'Delete row', 'need-confirmation');
+                echo "&nbsp;</td></tr>\n";
+        }
+        echo "<tr><td class=submit colspan=3>";
+        printImageHREF ('SAVE', 'Save changes', TRUE);
+        echo "</td></tr>\n";
+        echo '</form></table><br>';
+        finishPortlet();
+
+        startPortlet ('History');
+        renderObjectHistory ($row_id);
+        finishPortlet();
+}
+
+// Used by renderRack()
+function printObjectDetailsForRenderRack ($object_id, $hl_obj_id = 0)
+{
+        $objectData = spotEntity ('object', $object_id);
+        if ($objectData['asset_no'] != '')
+                $prefix = "<div title='${objectData['asset_no']}";
+        else
+                $prefix = "<div title='no asset tag";
+        // Don't tell about label, if it matches common name.
+        $body = '';
+        if ($objectData['name'] != $objectData['label'] && $objectData['label'] != '')
+                $body = ", visible label is \"${objectData['label']}\"";
+        // Display list of child objects, if any
+        $objectChildren = getChildren ($objectData, 'object');
+        $slotRows = $slotCols = $slotInfo = $slotData = $slotTitle = $slotClass = array ();
+        if (! count ($objectChildren))
+                $suffix = "'>";
+        else
+        {
+                foreach ($objectChildren as $childData)
+                {
+                        $childNames[] = $childData['name'];
+                        $attrData = getAttrValues ($childData['id']);
+                        $numRows = $numCols = 1;
+                        if (isset ($attrData[2])) // HW type
+                        {
+                                extractLayout ($attrData[2]);
+                                if (isset ($attrData[2]['rows']))
+                                {
+                                        $numRows = $attrData[2]['rows'];
+                                        $numCols = $attrData[2]['cols'];
+                                }
+                        }
+                        if (isset ($attrData['28'])) // slot number
+                        {
+                                $slot = $attrData['28']['value'];
+                                if (preg_match ('/\d+/', $slot, $matches))
+                                        $slot = $matches[0];
+                                $slotRows[$slot] = $numRows;
+                                $slotCols[$slot] = $numCols;
+                                $slotInfo[$slot] = $childData['dname'];
+                                $slotData[$slot] = $childData['id'];
+                                if ($childData['asset_no'] != '')
+                                        $slotTitle[$slot] = "<div title='${childData['asset_no']}";
+                                else
+                                        $slotTitle[$slot] = "<div title='no asset tag";
+                                if ($childData['label'] != '' && $childData['label'] != $childData['dname'])
+                                        $slotTitle[$slot] .= ", visible label is \"${childData['label']}\"";
+                                $slotTitle[$slot] .= "'>";
+                                $slotClass[$slot] = 'state_T';
+                                if ($childData['id'] == $hl_obj_id)
+                                        $slotClass[$slot] .= 'h';
+                                if ($childData['has_problems'] == 'yes')
+                                        $slotClass[$slot] .= 'w';
+
+                                $child = spotEntity ('object', $childData['id']);
+                                setEntityColors ($child);
+                                $class_context = $childData['id'] == $hl_obj_id ? 'atom_selected' : 'atom_plain';
+                                $slotClass[$slot] .= getCellClass ($child, $class_context);
+
+                        }
+                }
+                natsort($childNames);
+                $suffix = sprintf(", contains %s'>", implode(', ', $childNames));
+        }
+        echo "${prefix}${body}${suffix}" . mkCellA ($objectData) . '</div>';
+        if (in_array ($objectData['objtype_id'], array (1502,1503))) // server chassis, network chassis
+        {
+                $objAttr = getAttrValues ($objectData['id']);
+                if (isset ($objAttr[2])) // HW type
+                {
+                        extractLayout ($objAttr[2]);
+                        if (isset ($objAttr[2]['rows']))
+                        {
+                                $rows = $objAttr[2]['rows'];
+                                $cols = $objAttr[2]['cols'];
+                                $layout = $objAttr[2]['layout'];
+                                echo "<table width='100%' border='1'>";
+                                for ($r = 0; $r < $rows; $r++)
+                                {
+                                        echo '<tr>';
+                                        for ($c = 0; $c < $cols; $c++)
+                                        {
+                                                $s = ($r * $cols) + $c + 1;
+                                                if (isset ($slotData[$s]))
+                                                {
+                                                        if ($slotData[$s] >= 0)
+                                                        {
+                                                                for ($lr = 0; $lr < $slotRows[$s]; $lr++)
+                                                                        for ($lc = 0; $lc < $slotCols[$s]; $lc++)
+                                                                        {
+                                                                                $skip = ($lr * $cols) + $lc;
+                                                                                if ($skip > 0)
+                                                                                        $slotData[$s + $skip] = -1;
+                                                                        }
+                                                                echo '<td';
+                                                                if ($slotRows[$s] > 1)
+                                                                        echo " rowspan=$slotRows[$s]";
+                                                                if ($slotCols[$s] > 1)
+                                                                        echo " colspan=$slotCols[$s]";
+                                                                echo " class='${slotClass[$s]}'>${slotTitle[$s]}";
+                                                                if ($layout == 'V')
+                                                                {
+                                                                        $tmp = mb_substr($slotInfo[$s], 0, 1);
+                                                                        for($i = 1; $i < mb_strlen($slotInfo[$s]); $i++)
+                                                                        {
+                                                                                $tmp .= '<br>' . mb_substr($slotInfo[$s], $i, 1);
+                                                                        }
+                                                                        $slotInfo[$s] = $tmp;
+                                                                }
+                                                                echo mkA ($slotInfo[$s], 'object', $slotData[$s]);
+                                                                echo '</div></td>';
+                                                        }
+                                                }
+                                                else
+                                                        echo "<td class='state_F'><div title=\"Free slot\">&nbsp;</div></td>";
+                                        }
+                                        echo '</tr>';
+                                }
+                                echo '</table>';
+                        }
+                }
+        }
+}
+
+// This function renders rack as HTML table.
+function renderRack ($rack_id, $hl_obj_id = 0)
+{
+        $rackData = spotEntity ('rack', $rack_id);
+        amplifyCell ($rackData);
+        markAllSpans ($rackData);
+        setEntityColors ($rackData);
+        if ($hl_obj_id > 0)
+                highlightObject ($rackData, $hl_obj_id);
+        $neighbors = getRackNeighbors ($rackData['row_id'], $rack_id);
+        $prev_id = $neighbors['prev'];
+        $next_id = $neighbors['next'];
+        echo "<center><table border=0><tr valign=middle>";
+        echo '<td><h2>' . mkA ($rackData['row_name'], 'row', $rackData['row_id']) . ' :</h2></td>';
+        if ($prev_id != NULL)
+                echo '<td>' . mkA (getImageHREF ('prev', 'previous rack'), 'rack', $prev_id) . '</td>';
+        echo '<td><h2>' . mkA ($rackData['name'], 'rack', $rackData['id']) . '</h2></td>';
+        if ($next_id != NULL)
+                echo '<td>' . mkA (getImageHREF ('next', 'next rack'), 'rack', $next_id) . '</td>';
+        echo "</h2></td></tr></table>\n";
+        echo "<table class=rack border=0 cellspacing=0 cellpadding=1>\n";
+        echo "<tr><th width='10%'>&nbsp;</th><th width='20%'>Front</th>";
+        echo "<th width='50%'>Interior</th><th width='20%'>Back</th></tr>\n";
+        $reverse = considerConfiguredConstraint ($rackData, 'REVERSED_RACKS_LISTSRC');
+        for ($i = $rackData['height']; $i > 0; $i--)
+        {
+                echo '<tr><th>' . inverseRackUnit ($rackData['height'], $i, $reverse) . '</th>';
+                for ($locidx = 0; $locidx < 3; $locidx++)
+                {
+                        if (isset ($rackData[$i][$locidx]['skipped']))
+                                continue;
+                        $state = $rackData[$i][$locidx]['state'];
+
+                        $class = "atom state_${state}";
+
+                        if (isset ($rackData[$i][$locidx]['hl']))
+                                $class .= $rackData[$i][$locidx]['hl'];
+
+                        if($state == 'T')
+                        {
+                                $objectData = spotEntity ('object', $rackData[$i][$locidx]['object_id']);
+                                setEntityColors ($objectData);
+                                $class_context = $rackData[$i][$locidx]['object_id'] == $hl_obj_id ? 'atom_selected' : 'atom_plain';
+                                $class .= getCellClass ($objectData, $class_context);
+                        }
+
+                        echo "<td class='${class}'";
+
+                        if (isset ($rackData[$i][$locidx]['colspan']))
+                                echo ' colspan=' . $rackData[$i][$locidx]['colspan'];
+                        if (isset ($rackData[$i][$locidx]['rowspan']))
+                                echo ' rowspan=' . $rackData[$i][$locidx]['rowspan'];
+                        echo ">";
+                        switch ($state)
+                        {
+                                case 'T':
+                                        printObjectDetailsForRenderRack ($rackData[$i][$locidx]['object_id'], $hl_obj_id);
+                                        break;
+                                case 'A':
+                                        echo '<div title="This rackspace does not exist">&nbsp;</div>';
+                                        break;
+                                case 'F':
+                                        echo '<div title="Free rackspace">&nbsp;</div>';
+                                        break;
+                                case 'U':
+                                        echo '<div title="Problematic rackspace, you CAN\'T mount here">&nbsp;</div>';
+                                        break;
+                                default:
+                                        echo '<div title="No data">&nbsp;</div>';
+                                        break;
+                        }
+                        echo '</td>';
+                }
+                echo "</tr>\n";
+        }
+        echo "</table>\n";
+        // Get a list of all of objects Zero-U mounted to this rack
+        $zeroUObjects = getChildren ($rackData, 'object');
+        uasort ($zeroUObjects, 'compare_name');
+        if (count ($zeroUObjects) > 0)
+        {
+                echo "<br><table width='75%' class=rack border=0 cellspacing=0 cellpadding=1>\n";
+                echo "<tr><th>Zero-U:</th></tr>\n";
+                foreach ($zeroUObjects as $zeroUObject)
+                {
+                        $state = ($zeroUObject['id'] == $hl_obj_id) ? 'Th' : 'T';
+                        if ($zeroUObject['has_problems'] == 'yes')
+                                $state .= 'w';
+
+                        $class = "atom state_${state}";
+                        setEntityColors ($zeroUObject);
+                        $class_context = $zeroUObject['id'] == $hl_obj_id ? 'atom_selected' : 'atom_plain';
+                        $class .= getCellClass ($zeroUObject, $class_context);
+
+                        echo "<tr><td class='${class}'>";
+                        printObjectDetailsForRenderRack ($zeroUObject['id']);
+                        echo "</td></tr>\n";
+                }
+                echo "</table>\n";
+        }
+        echo "</center>\n";
+}
+
+function renderRackSortForm ($row_id)
+{
+        includeJQueryUIJS();
+        // Heredoc, not nowdoc!
+        $js = <<<"JSTXT"
+        $(document).ready(
+                function () {
+                        $("#sortRacks").sortable({
+                                update : function () {
+                                        serial = $('#sortRacks').sortable('serialize');
+                                        $.ajax({
+                                                url: 'index.php?module=ajax&ac=upd-rack-sort-order&row_id=${row_id}',
+                                                type: 'post',
+                                                data: serial,
+                                        });
+                                }
+                        });
+                }
+        );
+JSTXT;
+        addJSText ($js);
+
+        startPortlet ('Racks');
+        echo "<table border=0 cellspacing=0 cellpadding=5 align=center class=widetable>\n";
+        echo "<tr><th>Drag to change order</th></tr>\n";
+        echo "<tr><td class=tdleft><ul class='uflist' id='sortRacks'>\n";
+        foreach (getRacks($row_id) as $rack_id => $rackInfo)
+                echo "<li id=racks_${rack_id}>${rackInfo['name']}</li>\n";
+        echo "</ul></td></tr></table>\n";
+        finishPortlet();
+}
+
+function renderNewRackForm()
+{
+        $default_height = emptyStrIfZero (getConfigVar ('DEFAULT_RACK_HEIGHT'));
+        startPortlet ('Add one');
+        printOpFormIntro ('addRack', array ('mode' => 'one'));
+        echo '<table border=0 align=center>';
+        echo "<tr><th class=tdright>Name (required):</th><td class=tdleft><input type=text name=name></td>";
+        echo "<tr><th class=tdright>Height in units (required):</th><td class=tdleft><input type=text name=height1 value='${default_height}'></td></tr>\n";
+        echo "<tr><th class=tdright>Asset tag:</th><td class=tdleft><input type=text name=asset_no></td></tr>\n";
+        echo "<tr><th class=tdright>Tags:</td><td class=tdleft>";
+        printTagsPicker ();
+        echo "</td></tr>\n";
+        echo "<tr><td class=submit colspan=2>";
+        printImageHREF ('CREATE', 'Add', TRUE);
+        echo "</td></tr></table></form>";
+        finishPortlet();
+
+        startPortlet ('Add many');
+        printOpFormIntro ('addRack', array ('mode' => 'many'));
+        echo '<table border=0 align=center>';
+        echo "<tr><th class=tdright>Height in units (*):</th><td class=tdleft><input type=text name=height2 value='${default_height}'></td>";
+        echo "<tr><th class=tdright>Assign tags:</td><td class=tdleft>";
+        printTagsPicker ();
+        echo "</td></tr>\n";
+        echo "<tr><th class=tdright>Rack names (required):</th><td class=tdleft><textarea name=names cols=40 rows=25></textarea></td></tr>\n";
+        echo "<tr><td class=submit colspan=2>";
+        printImageHREF ('CREATE', 'Add', TRUE);
+        echo '</form></table>';
+        finishPortlet();
+}
+
+function renderEditObjectForm()
+{
+        $object_id = getBypassValue();
+        $object = spotEntity ('object', $object_id);
+        startPortlet ();
+        printOpFormIntro ('update');
+
+        // static attributes
+        echo '<table border=0 cellspacing=0 cellpadding=3 align=center>';
+        echo "<tr><td>&nbsp;</td><th colspan=2><h2>Attributes</h2></th></tr>";
+        echo '<tr><td>&nbsp;</td><th class=tdright>Type:</th><td class=tdleft>';
+        printSelect (getObjectTypeChangeOptions ($object['id']), array ('name' => 'object_type_id'), $object['objtype_id']);
+        echo '</td></tr>';
+        // baseline info
+        echo "<tr><td>&nbsp;</td><th class=tdright>Common name:</th><td class=tdleft><input type=text name=object_name value='${object['name']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Visible label:</th><td class=tdleft><input type=text name=object_label value='${object['label']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Asset tag:</th><td class=tdleft><input type=text name=object_asset_no value='${object['asset_no']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Tags:</th><td class=tdleft>";
+        printTagsPicker ();
+        echo "</td></tr>\n";
+        // parent selection
+        if (objectTypeMayHaveParent ($object['objtype_id']))
+        {
+                $parents = getParents ($object, 'object');
+                // lookup the human-readable object type, sort by it
+                foreach ($parents as $parent_id => $parent)
+                        $parents[$parent_id]['object_type'] = decodeObjectType ($parent['objtype_id']);
+                $grouped_parents = groupBy ($parents, 'object_type');
+                ksort ($grouped_parents);
+                foreach ($grouped_parents as $parents_group)
+                {
+                        uasort ($parents_group, 'compare_name');
+                        $label = $parents_group[key ($parents_group)]['object_type'] . (count($parents_group) > 1 ? ' containers:' : ' container:');
+                        foreach ($parents_group as $link_id => $parent_cell)
+                        {
+                                echo "<tr><td>&nbsp;</td>";
+                                echo "<th class=tdright>${label}</th><td class=tdleft>";
+                                echo mkCellA ($parent_cell);
+                                echo "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;";
+                                echo getOpLink (array('op'=>'unlinkObjects', 'link_id'=>$link_id), '', 'cut', 'Unlink container');
+                                echo "</td></tr>\n";
+                                $label = '&nbsp;';
+                        }
+                }
+                echo "<tr><td>&nbsp;</td>";
+                echo "<th class=tdright>Select container:</th><td class=tdleft>";
+                echo getPopupLink ('objlist', array(), 'findlink', 'attach', 'Select a container');
+                echo "</td></tr>\n";
+        }
+        renderEditAttributeTRs ('update', getAttrValuesSorted ($object_id), $object['objtype_id']);
+        echo '<tr><td>&nbsp;</td><th class=tdright><label for=object_has_problems>Has problems:</label></th>';
+        echo '<td class=tdleft><input type=checkbox name=object_has_problems id=object_has_problems';
+        if ($object['has_problems'] == 'yes')
+                echo ' checked';
+        echo "></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Actions:</th><td class=tdleft>";
+        echo getOpLink (array ('op'=>'deleteObject', 'page'=>'depot', 'tab'=>'addmore', 'object_id'=>$object_id), '' ,'destroy', 'Delete object', 'need-confirmation');
+        echo "&nbsp;";
+        echo getOpLink (array ('op'=>'resetObject'), '' ,'clear', 'Reset (cleanup) object', 'need-confirmation');
+        echo "</td></tr>\n";
+        echo "<tr><td colspan=3><b>Comment:</b><br><textarea name=object_comment rows=10 cols=80>${object['comment']}</textarea></td></tr>";
+
+        echo "<tr><th class=submit colspan=3>";
+        printImageHREF ('SAVE', 'Save changes', TRUE);
+        echo "</form></th></tr></table>\n";
+        finishPortlet();
+
+        echo '<table border=0 width=100%><tr><td>';
+        startPortlet ('history');
+        renderObjectHistory ($object_id);
+        finishPortlet();
+        echo '</td></tr></table>';
+}
+
+function renderEditRackForm ($rack_id)
+{
+        $rack = spotEntity ('rack', $rack_id);
+        amplifyCell ($rack);
+
+        startPortlet ('Attributes');
+        printOpFormIntro ('updateRack');
+        echo '<table border=0 align=center>';
+        echo "<tr><td>&nbsp;</td><th class=tdright>Rack row:</th><td class=tdleft>";
+        foreach (listCells ('row') as $row_id => $rowInfo)
+        {
+                $trail = getLocationTrail ($rowInfo['location_id'], FALSE);
+                $rows[$row_id] = empty ($trail) ? $rowInfo['name'] : $rowInfo['name'] . ' [' . $trail . ']';
+        }
+        natcasesort ($rows);
+        printSelect ($rows, array ('name' => 'row_id'), $rack['row_id']);
+        echo "</td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Name (required):</th><td class=tdleft><input type=text name=name value='${rack['name']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Height (required):</th><td class=tdleft><input type=text name=height value='${rack['height']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Asset tag:</th><td class=tdleft><input type=text name=asset_no value='${rack['asset_no']}'></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Tags:</th><td class=tdleft>";
+        printTagsPicker ();
+        echo "</td></tr>\n";
+        renderEditAttributeTRs ('updateRack', getAttrValuesSorted ($rack_id), 1560, array (27, 29));
+        echo '<tr><td>&nbsp;</td><th class=tdright><label for=has_problems>Has problems:</label></th>';
+        echo '<td class=tdleft><input type=checkbox name=has_problems id=has_problems';
+        if ($rack['has_problems'] == 'yes')
+                echo ' checked';
+        echo "></td></tr>\n";
+        echo "<tr><td>&nbsp;</td><th class=tdright>Actions:</th><td class=tdleft>";
+        if ($rack['isDeletable'])
+        {
+                echo getOpLink (array ('op'=>'deleteRack'), '', 'destroy', 'Delete rack', 'need-confirmation');
+                echo "&nbsp;";
+        }
+        else
+        {
+                echo getOpLink (array ('op'=>'cleanRack'), '' ,'clear', 'Reset (cleanup) rack mounts', 'need-confirmation');
+                echo "&nbsp;";
+        }
+        echo "</td></tr>\n";
+        echo "<tr><td colspan=3><b>Comment:</b><br><textarea name=comment rows=10 cols=80>${rack['comment']}</textarea></td></tr>";
+        echo "<tr><td class=submit colspan=3>";
+        printImageHREF ('SAVE', 'Save changes', TRUE);
+        echo "</td></tr>\n";
+        echo '</form></table><br>';
+        finishPortlet();
+
+        startPortlet ('History');
+        renderObjectHistory ($rack_id);
+        finishPortlet();
+}
+
+// populates the $summary array with the sum of power attributes of the objects mounted into the rack
+function populateRackPower ($rackData, &$summary)
+{
+        $power_attrs = array(
+                7, // 'float','max. current, Ampers'
+                13, // 'float','max power, Watts'
+        );
+        $sum = array();
+        if (! isset ($rackData['mountedObjects']))
+                amplifyCell ($rackData);
+        foreach ($rackData['mountedObjects'] as $object_id)
+        {
+                $attrs = getAttrValues ($object_id);
+                foreach ($power_attrs as $attr_id)
+                        if (isset ($attrs[$attr_id]) && $attrs[$attr_id]['type'] == 'float')
+                        {
+                                if (! isset ($sum[$attr_id]))
+                                {
+                                        $sum[$attr_id]['sum'] = 0.0;
+                                        $sum[$attr_id]['name'] = $attrs[$attr_id]['name'];
+                                }
+                                $sum[$attr_id]['sum'] += $attrs[$attr_id]['value'];
+                        }
+        }
+        foreach ($sum as $attr)
+                if ($attr['sum'] > 0.0)
+                        $summary[$attr['name']] = $attr['sum'];
+}
+
+// used by renderGridForm() and renderRackPage()
+function renderRackInfoPortlet ($rackData)
+{
+        $summary = array();
+        $summary['Rack row'] = mkA ($rackData['row_name'], 'row', $rackData['row_id']);
+        $summary['Name'] = $rackData['name'];
+        $summary['Height'] = $rackData['height'];
+        if ($rackData['asset_no'] != '')
+                $summary['Asset tag'] = $rackData['asset_no'];
+        if ($rackData['has_problems'] == 'yes')
+                $summary[] = array ('<tr><td colspan=2 class=msg_error>Has problems</td></tr>');
+        populateRackPower ($rackData, $summary);
+        // Display populated attributes, but skip 'height' since it's already displayed above
+        // and skip 'sort_order' because it's modified using AJAX
+        foreach (getAttrValuesSorted ($rackData['id']) as $record)
+                if
+                (
+                        $record['id'] != 27 && $record['id'] != 29 &&
+                        $record['value'] != '' &&
+                        permitted (NULL, NULL, NULL, array (array ('tag' => '$attr_' . $record['id'])))
+                )
+                        $summary['{sticker}' . $record['name']] = formatAttributeValue ($record, 1560);
+        $summary['% used'] = getProgressBar (getRSUforRack ($rackData));
+        $summary['Objects'] = count ($rackData['mountedObjects']);
+        $summary['tags'] = '';
+        renderEntitySummary ($rackData, 'summary', $summary);
+        if ($rackData['comment'] != '')
+        {
+                startPortlet ('Comment');
+                echo '<div class=commentblock>' . string_insert_hrefs ($rackData['comment']) . '</div>';
+                finishPortlet ();
+        }
+}
+
+// This is a universal editor of rack design/waste.
+function renderGridForm ($rack_id, $filter, $header, $submit, $state1, $state2)
+{
+        $rackData = spotEntity ('rack', $rack_id);
+        amplifyCell ($rackData);
+        $filter ($rackData);
+
+        // Render the result whatever it is.
+        // Main layout.
+        echo "<table border=0 class=objectview cellspacing=0 cellpadding=0>";
+        echo "<tr><td colspan=2 align=center><h1>${rackData['name']}</h1></td></tr>\n";
+
+        // Left column with information portlet.
+        echo "<tr><td class=pcleft height='1%' width='50%'>";
+        renderRackInfoPortlet ($rackData);
+        echo "</td>\n";
+        echo "<td class=pcright>";
+
+        // Grid form.
+        $is_ro = !rackModificationPermitted ($rackData, 'updateRack');
+        startPortlet ($header);
+        includeJQueryUIJS();
+        addJSInternal ('js/racktables.js');
+        $table_id = 'selectableRack';
+        addBulkSelectorJS ($table_id);
+        echo "<center>\n";
+        $read_only_text = $is_ro ? '(read-only)' : '&nbsp;';
+        echo "<p style='color: red; margin-top:0px'>${read_only_text}</p>\n";
+        echo "<table class=rack id={$table_id} border=0 cellspacing=0 cellpadding=1>\n";
+        echo "<tr><th width='10%'>&nbsp;</th>";
+        echo "<th width='20%'><a href='javascript:;' onclick=\"toggleColumnOfAtoms('${rack_id}', '0', ${rackData['height']})\">Front</a></th>";
+        echo "<th width='50%'><a href='javascript:;' onclick=\"toggleColumnOfAtoms('${rack_id}', '1', ${rackData['height']})\">Interior</a></th>";
+        echo "<th width='20%'><a href='javascript:;' onclick=\"toggleColumnOfAtoms('${rack_id}', '2', ${rackData['height']})\">Back</a></th></tr>\n";
+        printOpFormIntro ('updateRack');
+        markupAtomGrid ($rackData, $state2);
+        renderAtomGrid ($rackData, $is_ro);
+        echo "</table></center>\n";
+        echo "<br><input type=submit name=do_update value='${submit}'></form><br><br>\n";
+        finishPortlet();
+        echo "</td></tr></table>\n";
+}
+
+function renderRackDesign ($rack_id)
+{
+        renderGridForm ($rack_id, 'applyRackDesignMask', 'Rack design', 'Set rack design', 'A', 'F');
+}
+
+function renderRackProblems ($rack_id)
+{
+        renderGridForm ($rack_id, 'applyRackProblemMask', 'Rack problems', 'Mark unusable atoms', 'F', 'U');
+}
+
+function renderObjectPortHeaderRow()
+{
+        // Renders the headers for the ports table on the default page
+
+        echo '<tr><th class=tdleft>INT name</th><th class=tdleft>Visible label</th>';
+        echo '<th class=tdleft>INT Type</th><th class=tdleft>MAC address / WWPN</th>';
+        echo '<th class=tdcenter colspan=2>Switch-Port</th>';
+        echo '<th class=tdleft>Po ID & Description</th></tr>';
+}
+
+function renderObjectPortRow ($port, $is_highlighted)
+{
+        // highlight port name with yellow if its name is not canonical
+        $canon_pn = shortenPortName ($port['name'], $port['object_id']);
+        $name_class = $canon_pn == $port['name'] ? '' : 'trwarning';
+
+        echo '<tr';
+        if ($is_highlighted)
+                echo ' class=highlight';
+        $a_class = isEthernetPort ($port) ? 'port-menu' : '';
+        echo "><td class='tdleft $name_class' NOWRAP><a name='port-${port['id']}' class='interactive-portname nolink $a_class'>${port['name']}</a></td>";
+        echo "<td class=tdleft>${port['label']}</td>";
+        echo "<td class=tdleft>" . formatPortIIFOIF ($port) . "</td><td class='tdleft l2address'>${port['l2address']}</td>";
+        if ($port['remote_object_id'])
+        {
+                $dname = formatObjectDisplayedName ($port['remote_object_name'], $port['remote_object_tid']);
+                echo "<td class=tdleft>" .
+                        formatPortLink ($port['remote_object_id'], $dname, $port['remote_id'], NULL) .
+                        "</td>";
+                echo "<td class=tdleft>" . formatLoggedSpan ($port['last_log'], $port['remote_name'], 'underline') . "</td>";
+                $editable = permitted ('object', 'ports', 'editPort')
+                        ? 'editable'
+                        : '';
+                echo "<td class=tdleft><span class='rsvtext $editable id-${port['id']} op-upd-reservation-cable'>${port['cableid']}</span></td>";
+        }
+        else
+                echo implode ('', formatPortReservation ($port)) . '<td></td>';
+        echo "</tr>";
+}
+
+function renderObject ($object_id)
+{
+        global $nextorder, $virtual_obj_types;
+        $info = spotEntity ('object', $object_id);
+        amplifyCell ($info);
+        // Main layout starts.
+        echo "<table border=0 class=objectview cellspacing=0 cellpadding=0>";
+        echo "<tr><td colspan=2 align=center><h1>${info['dname']}</h1></td></tr>\n";
+        // A mandatory left column with varying number of portlets.
+        echo "<tr><td class=pcleft>";
+
+        // display summary portlet
+        $summary = array();
+        if ($info['name'] != '')
+                $summary['Common name'] = $info['name'];
+        elseif (considerConfiguredConstraint ($info, 'NAMEWARN_LISTSRC'))
+                $summary[] = array ('<tr><td colspan=2 class=msg_error>Common name is missing.</td></tr>');
+        $summary['Object type'] = '<a href="' . makeHref (array (
+                'page' => 'depot',
+                'tab' => 'default',
+                'cfe' => '{$typeid_' . $info['objtype_id'] . '}'
+        )) . '">' .  decodeObjectType ($info['objtype_id']) . '</a>';
+        if ($info['label'] != '')
+                $summary['Visible label'] = $info['label'];
+        if ($info['asset_no'] != '')
+                $summary['Asset tag'] = $info['asset_no'];
+        elseif (considerConfiguredConstraint ($info, 'ASSETWARN_LISTSRC'))
+                $summary[] = array ('<tr><td colspan=2 class=msg_error>Asset tag is missing.</td></tr>');
+        $parents = getParents ($info, 'object');
+        // lookup the human-readable object type, sort by it
+        foreach ($parents as $parent_id => $parent)
+                $parents[$parent_id]['object_type'] = decodeObjectType ($parent['objtype_id']);
+        $grouped_parents = groupBy ($parents, 'object_type');
+        ksort ($grouped_parents);
+        foreach ($grouped_parents as $parents_group)
+        {
+                uasort ($parents_group, 'compare_name');
+                $label = $parents_group[key ($parents_group)]['object_type'] . (count($parents_group) > 1 ? ' containers' : ' container');
+                $fmt_parents = array();
+                foreach ($parents_group as $parent)
+                        $fmt_parents[] = mkCellA ($parent);
+                $summary[$label] = implode ('<br>', $fmt_parents);
+        }
+        $children = getChildren ($info, 'object');
+        foreach (groupBy ($children, 'objtype_id') as $objtype_id => $children_group)
+        {
+                uasort ($children_group, 'compare_name');
+                $fmt_children = array();
+                foreach ($children_group as $child)
+                        $fmt_children[] = mkCellA ($child);
+                $summary["Contains " . mb_strtolower(decodeObjectType ($objtype_id))] = implode ('<br>', $fmt_children);
+        }
+        if ($info['has_problems'] == 'yes')
+                $summary[] = array ('<tr><td colspan=2 class=msg_error>Has problems</td></tr>');
+        foreach (getAttrValuesSorted ($object_id) as $record)
+                if
+                (
+                        $record['value'] != '' &&
+                        permitted (NULL, NULL, NULL, array (array ('tag' => '$attr_' . $record['id'])))
+                )
+                        $summary['{sticker}' . $record['name']] = formatAttributeValue ($record, $info['objtype_id']);
+        $summary[] = array (getOutputOf ('printTagTRs',
+                $info,
+                makeHref
+                (
+                        array
+                        (
+                                'page'=>'depot',
+                                'tab'=>'default',
+                                'andor' => 'and',
+                                'cfe' => '{$typeid_' . $info['objtype_id'] . '}',
+                        )
+                )."&"
+        ));
+        renderEntitySummary ($info, 'summary', $summary);
+
+        if ($info['comment'] != '')
+        {
+                startPortlet ('Comment');
+                echo '<div class=commentblock>' . string_insert_hrefs ($info['comment']) . '</div>';
+                finishPortlet ();
+        }
+
+        $logrecords = getLogRecordsForObject ($object_id);
+        $lr_nrows = count ($logrecords);
+        $lr_confmax = getConfigVar ('OBJECTLOG_PREVIEW_ENTRIES');
+        $lr_max = array_key_exists ('ope', $_REQUEST) ? genericAssertion ('ope', 'unsigned') : $lr_confmax;
+        if ($lr_nrows > 0 && $lr_max > 0)
+        {
+                $title = 'log records';
+                if ($lr_max < $lr_nrows)
+                        $title .= sprintf (' (last %u, <a href="%s">show all</a>)', $lr_max, buildRedirectURL (NULL, NULL, array ('ope' => $lr_nrows)));
+                elseif ($lr_confmax > 0 && $lr_confmax < $lr_nrows)
+                        $title .= sprintf (' (all, <a href="%s">show last %u</a>)', buildRedirectURL(), $lr_confmax);
+
+                startPortlet ($title);
+                echo "<table cellspacing=0 cellpadding=5 align=center class=widetable width='100%'>";
+                $order = 'odd';
+                foreach (array_slice ($logrecords, 0, $lr_max) as $row)
+                {
+                        echo "<tr class=row_${order} valign=top>";
+                        echo '<td class=tdleft>' . $row['date'] . '<br>' . $row['user'] . '</td>';
+                        echo '<td class="logentry">' . string_insert_hrefs (htmlspecialchars ($row['content'], ENT_NOQUOTES)) . '</td>';
+                        echo '</tr>';
+                        $order = $nextorder[$order];
+                }
+                echo '</table>';
+                finishPortlet();
+        }
+
+        switchportInfoJS ($object_id); // load JS code to make portnames interactive
+        renderFilesPortlet ('object', $object_id);
+
+        if (count ($info['ports']))
+        {
+                startPortlet ('ports and links');
+                $hl_port_id = 0;
+                if (isset ($_REQUEST['hl_port_id']))
+                {
+                        genericAssertion ('hl_port_id', 'natural');
+                        $hl_port_id = $_REQUEST['hl_port_id'];
+                        addAutoScrollScript ("port-$hl_port_id");
+                }
+                echo "<table cellspacing=0 cellpadding='5' align='center' class='widetable'>";
+                callHook ('renderObjectPortHeaderRow');
+                foreach ($info['ports'] as $port)
+                        callHook ('renderObjectPortRow', $port, ($hl_port_id == $port['id']));
+                if (permitted (NULL, 'ports', 'set_reserve_comment'))
+                        addJSInternal ('js/inplace-edit.js');
+                echo "</table><br>";
+                finishPortlet();
+        }
+
+        if (count ($info['ipv4']) + count ($info['ipv6']))
+        {
+                startPortlet ('IP addresses');
+                echo "<table cellspacing=0 cellpadding='5' align='center' class='widetable'>\n";
+                if ('yes' == $ext_ipv4_view = getConfigVar ('EXT_IPV4_VIEW'))
+                        echo "<tr class=tdleft><th>OS interface</th><th>IP address</th><th>network</th><th>routed by</th><th>peers</th></tr>\n";
+                else
+                        echo "<tr class=tdleft><th>OS interface</th><th>IP address</th><th>peers</th></tr>\n";
+
+                // group IP allocations by interface name instead of address family
+                $allocs_by_iface = array();
+                foreach (array ('ipv4', 'ipv6') as $ip_v)
+                        foreach ($info[$ip_v] as $ip_bin => $alloc)
+                                $allocs_by_iface[$alloc['osif']][$ip_bin] = $alloc;
+
+                // sort allocs array by portnames
+                foreach (sortPortList ($allocs_by_iface) as $iface_name => $alloclist)
+                {
+                        $is_first_row = TRUE;
+                        foreach ($alloclist as $alloc)
+                        {
+                                $rendered_alloc = callHook ('getRenderedAlloc', $object_id, $alloc);
+                                echo "<tr class='${rendered_alloc['tr_class']}' valign=top>";
+
+                                // display iface name, same values are grouped into single cell
+                                if ($is_first_row)
+                                {
+                                        $rowspan = count ($alloclist) > 1 ? 'rowspan="' . count ($alloclist) . '"' : '';
+                                        echo "<td class=tdleft $rowspan>" . $iface_name . $rendered_alloc['td_name_suffix'] . "</td>";
+                                        $is_first_row = FALSE;
+                                }
+                                echo $rendered_alloc['td_ip'];
+                                if ($ext_ipv4_view == 'yes')
+                                {
+                                        echo $rendered_alloc['td_network'];
+                                        echo $rendered_alloc['td_routed_by'];
+                                }
+                                echo $rendered_alloc['td_peers'];
+
+                                echo "</tr>\n";
+                        }
+                }
+                echo "</table><br>\n";
+                finishPortlet();
+        }
+
+        $forwards = $info['nat4'];
+        if (count ($forwards['in']) || count ($forwards['out']))
+        {
+                startPortlet('NATv4');
+
+                if (count($forwards['out']))
+                {
+
+                        echo "<h3>locally performed NAT</h3>";
+
+                        echo "<table class='widetable' cellpadding=5 cellspacing=0 border=0 align='center'>\n";
+                        echo "<tr><th>Proto</th><th>Match endpoint</th><th>Translate to</th><th>Target object</th><th>Rule comment</th></tr>\n";
+
+                        foreach ($forwards['out'] as $pf)
+                        {
+                                $class = 'trerror';
+                                $osif = '';
+                                $localip_bin = ip_parse ($pf['localip']);
+                                if (array_key_exists ($localip_bin, $info['ipv4']))
+                                {
+                                        $class = $info['ipv4'][$localip_bin]['addrinfo']['class'];
+                                        $osif = $info['ipv4'][$localip_bin]['osif'] . ': ';
+                                }
+                                echo "<tr class='$class'>";
+                                echo "<td class=tdleft>${pf['proto']}</td><td class=tdleft>${osif}" . getRenderedIPPortPair ($pf['localip'], $pf['localport']) . "</td>";
+                                echo "<td class=tdleft>" . getRenderedIPPortPair ($pf['remoteip'], $pf['remoteport']) . "</td>";
+                                $address = getIPAddress (ip4_parse ($pf['remoteip']));
+                                echo "<td class='description tdleft'>";
+                                if (count ($address['allocs']))
+                                        foreach($address['allocs'] as $bond)
+                                                echo mkA ("${bond['object_name']}(${bond['name']})", 'object', $bond['object_id']) . ' ';
+                                elseif ($pf['remote_addr_name'] != '')
+                                        echo '(' . $pf['remote_addr_name'] . ')';
+                                echo "</td><td class='description tdleft'>${pf['description']}</td></tr>";
+                        }
+                        echo "</table><br><br>";
+                }
+                if (count($forwards['in']))
+                {
+                        echo "<h3>arriving NAT connections</h3>";
+                        echo "<table class='widetable' cellpadding=5 cellspacing=0 border=0 align='center'>\n";
+                        echo "<tr><th>Matched endpoint</th><th>Source object</th><th>Translated to</th><th>Rule comment</th></tr>\n";
+                        foreach ($forwards['in'] as $pf)
+                        {
+                                echo "<tr>";
+                                echo "<td class=tdleft>${pf['proto']}/" . getRenderedIPPortPair ($pf['localip'], $pf['localport']) . "</td>";
+                                echo '<td class="description tdleft">' . mkA ($pf['object_name'], 'object', $pf['object_id']);
+                                echo "</td><td class=tdleft>" . getRenderedIPPortPair ($pf['remoteip'], $pf['remoteport']) . "</td>";
+                                echo "<td class='description tdleft'>${pf['description']}</td></tr>";
+                        }
+                        echo "</table><br><br>";
+                }
+                finishPortlet();
+        }
+
+        renderSLBTriplets2 ($info);
+        renderSLBTriplets ($info);
+        echo "</td>\n";
+
+        // A conditional right column with the rackspace portlet only.
+        if
+        (
+                ! in_array ($info['objtype_id'], $virtual_obj_types) &&
+                count ($rack_ids = getResidentRackIDs ($object_id))
+        )
+        {
+                echo '<td class=pcright>';
+                startPortlet ('rackspace allocation');
+                foreach ($rack_ids as $rack_id)
+                        renderRack ($rack_id, $object_id);
+                echo '<br>';
+                finishPortlet();
+                echo '</td>';
+        }
+        echo "<tr></table>\n";
+}
+
+function renderRackMultiSelect ($sname, $racks, $selected)
+{
+        // Transform the given flat list into a list of groups, each representing a rack row.
+        $rdata = array();
+        foreach ($racks as $rack)
+        {
+                if ('' != $trail = getLocationTrail ($rack['location_id'], FALSE))
+                        $row_name = $trail . ' : ' . $rack['row_name'];
+                else
+                        $row_name = $rack['row_name'];
+                $rdata[$row_name][$rack['id']] = $rack['name'];
+        }
+        echo "<select name=${sname} multiple size=" . getConfigVar ('MAXSELSIZE') . " onchange='getElementsByName(\"updateObjectAllocation\")[0].submit()'>\n";
+        $row_names = array_keys ($rdata);
+        natsort ($row_names);
+        foreach ($row_names as $optgroup)
+        {
+                echo "<optgroup label='${optgroup}'>";
+                foreach ($rdata[$optgroup] as $rack_id => $rack_name)
+                {
+                        echo "<option value=${rack_id}";
+                        if (!(array_search ($rack_id, $selected) === FALSE))
+                                echo ' selected';
+                        echo">${rack_name}</option>\n";
+                }
+        }
+        echo "</select>\n";
+}
